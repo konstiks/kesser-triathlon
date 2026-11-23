@@ -129,8 +129,7 @@ struct PlannedWorkoutRow: View {
                         .font(.subheadline.weight(.semibold))
                         .strikethrough(workout.status == .skipped)
                     if workout.isKey {
-                        Image(systemName: "key.fill").font(.caption2).foregroundStyle(.yellow)
-                            .accessibilityLabel("Schlüsseleinheit")
+                        ImportantTag()
                     }
                 }
                 HStack(spacing: 6) {
@@ -212,5 +211,19 @@ struct SectionHeader: View {
             if let trailing { Text(trailing).font(.subheadline).foregroundStyle(.secondary) }
         }
         .padding(.top, 8)
+    }
+}
+
+/// Markiert die wichtigsten Einheiten der Woche (lange Einheiten, Intervalle).
+struct ImportantTag: View {
+    var body: some View {
+        Label("Wichtig", systemImage: "star.fill")
+            .labelStyle(.titleAndIcon)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.yellow.opacity(0.22), in: Capsule())
+            .foregroundStyle(Color.orange)
+            .accessibilityLabel("Wichtige Einheit")
     }
 }

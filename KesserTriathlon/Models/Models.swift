@@ -12,14 +12,22 @@ final class AthleteProfile {
     var bikeKm: Double = 20
     var runKm: Double = 4.8
 
-    /// Ruhetage, 0 = Montag … 6 = Sonntag.
-    var restDays: [Int] = [0]
+    /// Feste Ruhetage (an denen nie trainiert wird), 0 = Montag … 6 = Sonntag.
+    var restDays: [Int] = []
+    /// Gewünschte Trainingstage pro Woche (3–7).
+    var trainingDaysPerWeek: Int = 4
+    /// Arbeitstage (0 = Montag …) und Arbeitszeit in Minuten ab Mitternacht.
+    var workDays: [Int] = [0, 1, 2, 3, 4]
+    var workStartMinutes: Int = 8 * 60
+    var workEndMinutes: Int = 17 * 60
     /// Maximale Trainingszeit an Werktagen bzw. am Wochenende (Minuten).
     var weekdayMaxMinutes: Int = 75
     var weekendMaxMinutes: Int = 180
-    /// Zeitfenster, in dem trainiert werden kann (für die Kalender-Auswertung).
+    /// Zeitfenster, in dem trainiert werden kann.
     var dayStartHour: Int = 6
     var dayEndHour: Int = 21
+    /// Version der Plan-Logik, mit der der Plan erstellt wurde (für automatische Updates).
+    var planVersion: Int = 1
 
     var useCalendar: Bool = false
     var healthConnected: Bool = false
@@ -68,9 +76,25 @@ final class AthleteProfile {
 
     var taperWeeks: Int { bikeKm >= 80 ? 2 : 1 }
 
+    /// Persönliches Zeitbudget eines Tages (0 an festen Ruhetagen).
     func maxMinutes(on day: Date) -> Int {
         if restDays.contains(day.weekdayIndex) { return 0 }
         return day.weekdayIndex >= 5 ? weekendMaxMinutes : weekdayMaxMinutes
+    }
+
+    func isWorkDay(_ day: Date) -> Bool { workDays.contains(day.weekdayIndex) }
+
+    /// Arbeitszeit an diesem Tag (nil, wenn kein Arbeitstag).
+    func workInterval(on day: Date) -> DateInterval? {
+        guard isWorkDay(day), workEndMinutes > workStartMinutes else { return nil }
+        let start = day.startOfDay.addingTimeInterval(TimeInterval(workStartMinutes * 60))
+        let end = day.startOfDay.addingTimeInterval(TimeInterval(workEndMinutes * 60))
+        return DateInterval(start: start, end: end)
+    }
+
+    var workTimeText: String {
+        func t(_ m: Int) -> String { String(format: "%d:%02d", m / 60, m % 60) }
+        return "\(t(workStartMinutes))–\(t(workEndMinutes)) Uhr"
     }
 
     var raceDay: Date { raceDate.startOfDay }
@@ -143,6 +167,11 @@ final class PlannedWorkout {
     }
 
     var isOverdue: Bool { status == .planned && date < Date.now.startOfDay }
+
+    /// "Mittwoch" (innerhalb einer Woche) bzw. "Mi., 3. Dez."
+    var weekdayText: String {
+        abs(Date.now.days(until: date)) < 7 ? date.weekdayName : date.shortDayText
+    }
 }
 
 /// Ein absolviertes Training (manuell eingetragen oder aus Apple Health).

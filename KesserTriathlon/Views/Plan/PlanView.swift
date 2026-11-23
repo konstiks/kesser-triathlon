@@ -123,7 +123,7 @@ struct PlanView: View {
                     .buttonStyle(.plain)
             }
             if items.isEmpty && extra.isEmpty && !isRace {
-                Text(profile.restDays.contains(day.weekdayIndex) ? "Ruhetag 😴" : "Frei")
+                Text(profile.restDays.contains(day.weekdayIndex) ? "Fester Ruhetag 😴" : "Trainingsfrei 😴")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         } header: {

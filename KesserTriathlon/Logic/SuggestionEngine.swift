@@ -1,16 +1,5 @@
 import Foundation
 
-/// Freie Zeit an einem Tag (aus Kalender oder Einstellungen).
-struct DayAvailability {
-    /// Größter zusammenhängender freier Block in Minuten.
-    let largestBlockMinutes: Int
-    let totalFreeMinutes: Int
-    let busyMinutes: Int
-    let eventCount: Int
-    /// true, wenn die Werte aus dem Kalender stammen.
-    let fromCalendar: Bool
-}
-
 struct Suggestion {
     enum Kind { case train, rest, race, done }
 
@@ -44,7 +33,7 @@ struct Suggestion {
 
 /// Schlägt das sinnvollste Training für heute vor.
 ///
-/// Berücksichtigt: Plan des Tages, verpasste Schlüsseleinheiten, freie Zeit laut Kalender,
+/// Berücksichtigt: Plan des Tages, verpasste Einheiten, freie Zeit laut Kalender,
 /// Ermüdung (Ampel-Bewertungen, Belastungsanstieg) und die schwächste Disziplin.
 enum SuggestionEngine {
 
@@ -92,9 +81,10 @@ enum SuggestionEngine {
         var headline = ""
 
         let weekStart = day.startOfWeek
-        let missedKey = planned.filter {
-            $0.status == .planned && $0.isKey && $0.date >= weekStart && $0.date < day
-        }.sorted { $0.date > $1.date }.first
+        // Verpasste Einheit dieser Woche (wichtige zuerst, dann die jüngste)
+        let missed = planned.filter {
+            $0.status == .planned && $0.date >= weekStart && $0.date < day
+        }.sorted { ($0.isKey ? 0 : 1, -$0.date.timeIntervalSince1970) < ($1.isKey ? 0 : 1, -$1.date.timeIntervalSince1970) }.first
 
         if let p = openToday.first {
             discipline = p.discipline
@@ -103,28 +93,30 @@ enum SuggestionEngine {
             plannedID = p.id
             headline = p.title
             reasons.append("Laut Plan: \(p.title) (\(formatMinutes(p.minutes)), \(p.intensity.shortName)).")
-        } else if let m = missedKey, avail.largestBlockMinutes >= 30, !profile.restDays.contains(day.weekdayIndex) {
+        } else if let m = missed, avail.largestBlockMinutes >= 30, fatigue < 2 {
             discipline = m.discipline
             intensity = m.intensity
             minutes = m.minutes
             plannedID = m.id
             headline = "Nachholen: \(m.title)"
-            reasons.append("Die Schlüsseleinheit vom \(m.date.weekdayName) fehlt noch. Heute wäre Platz dafür.")
-        } else if profile.restDays.contains(day.weekdayIndex) || fatigue >= 2 {
-            return Suggestion(kind: .rest, discipline: nil, intensity: .recovery, minutes: 0,
-                              headline: fatigue >= 2 ? "Erholung statt Training" : "Ruhetag",
-                              reasons: fatigue >= 2
-                                ? ["Deine letzten Bewertungen waren rot. Der Körper braucht Pause, um stärker zu werden."]
-                                : ["Ruhetage gehören zum Plan. Etwas Mobility oder ein Spaziergang ist okay."],
-                              plannedID: nil, moveTo: nil)
+            reasons.append(m.isKey
+                ? "Die wichtige Einheit vom \(m.weekdayText) fehlt noch. Heute wäre Platz dafür."
+                : "Die Einheit vom \(m.weekdayText) ist offen geblieben. Heute wäre Zeit zum Nachholen.")
         } else {
-            // Kein Plan für heute: schwächste Disziplin locker
-            let weakest = progress.min(by: { $0.readiness < $1.readiness })?.discipline ?? .run
-            discipline = weakest
-            intensity = .easy
-            minutes = min(45, max(30, avail.largestBlockMinutes - 15))
-            headline = "Bonus: lockeres \(weakest.name)"
-            reasons.append("Heute ist nichts geplant. \(weakest.name) ist gerade deine schwächste Disziplin.")
+            let reason: String
+            if fatigue >= 2 {
+                reason = "Deine letzten Bewertungen waren rot. Der Körper braucht Pause, um stärker zu werden."
+            } else if profile.restDays.contains(day.weekdayIndex) {
+                reason = "Fester Ruhetag. Etwas Mobility oder ein Spaziergang ist okay."
+            } else {
+                reason = "Heute ist kein Training geplant. Erholung gehört zum Plan, genieß den freien Tag!"
+            }
+            let next = planned.filter { $0.status == .planned && $0.date > day }.min { $0.date < $1.date }
+            var restReasons = [reason]
+            if let next { restReasons.append("Nächste Einheit: \(next.title) am \(next.weekdayText).") }
+            return Suggestion(kind: .rest, discipline: nil, intensity: .recovery, minutes: 0,
+                              headline: fatigue >= 2 ? "Erholung statt Training" : "Trainingsfreier Tag",
+                              reasons: restReasons, plannedID: nil, moveTo: nil)
         }
 
         // Ermüdung → Intensität und Umfang reduzieren
@@ -146,9 +138,19 @@ enum SuggestionEngine {
         if usable < 20 {
             let suggestionDay = nextDayWithTime(after: day, minutes: minutes, planned: planned, profile: profile, availability: availability)
             moveTo = suggestionDay
-            var why = avail.fromCalendar
-                ? "Dein Kalender ist heute ziemlich voll (\(avail.eventCount) Termine)."
-                : "Heute ist laut deinen Einstellungen keine Trainingszeit."
+            var why: String
+            switch avail.limit {
+            case .dayOver:
+                why = "Dein Trainingsfenster für heute (bis \(profile.dayEndHour) Uhr) ist vorbei."
+            case .work:
+                why = "Neben deiner Arbeitszeit (\(profile.workTimeText)) bleibt heute zu wenig Zeit."
+            case .calendar:
+                why = "Deine Termine lassen heute kaum Luft (\(avail.eventCount) \(avail.eventCount == 1 ? "Termin" : "Termine"))."
+            case .restDay:
+                why = "Heute ist ein fester Ruhetag."
+            case .budget, .none:
+                why = "Dein Zeitbudget für heute ist zu knapp."
+            }
             if let s = suggestionDay { why += " Besser auf \(s.weekdayName) verschieben." }
             reasons.append(why)
             return Suggestion(kind: .rest, discipline: discipline, intensity: intensity, minutes: minutes,
@@ -156,16 +158,20 @@ enum SuggestionEngine {
                               reasons: reasons, plannedID: plannedID, moveTo: moveTo)
         } else if usable < minutes {
             let shortened = max(20, usable)
-            reasons.append(avail.fromCalendar
-                ? "Laut Kalender hast du max. \(formatMinutes(avail.largestBlockMinutes)) am Stück frei. Also kürzer: \(formatMinutes(shortened))."
-                : "Dein Zeitbudget heute: \(formatMinutes(avail.largestBlockMinutes)). Also kürzer: \(formatMinutes(shortened)).")
+            let source: String
+            switch avail.limit {
+            case .calendar: source = "Laut Kalender"
+            case .work: source = "Neben der Arbeit"
+            default: source = "Heute"
+            }
+            reasons.append("\(source) hast du max. \(formatMinutes(avail.largestBlockMinutes)) am Stück frei. Also kürzer: \(formatMinutes(shortened)).")
             if intensity == .easy && shortened < minutes / 2 {
                 intensity = .moderate
                 reasons.append("Weniger Zeit → dafür etwas zügiger (GA2).")
             }
             minutes = shortened
-        } else if avail.fromCalendar {
-            reasons.append("Im Kalender ist genug Luft: \(formatMinutes(avail.largestBlockMinutes)) am Stück frei.")
+        } else if avail.fromCalendar && avail.eventCount > 0 {
+            reasons.append("Trotz Terminen genug Luft: \(formatMinutes(avail.largestBlockMinutes)) am Stück frei.")
         }
 
         // Rückstand in einer Disziplin
@@ -208,7 +214,7 @@ enum SuggestionEngine {
         return recent.count == 2 && recent.allSatisfy { $0.mood == .green && $0.effort != .red }
     }
 
-    /// Nächster Tag (max. 6 Tage voraus) mit genug Zeit und ohne andere Schlüsseleinheit.
+    /// Nächster Tag (max. 6 Tage voraus) mit genug Zeit und ohne andere wichtige Einheit.
     static func nextDayWithTime(after day: Date, minutes: Int, planned: [PlannedWorkout],
                                 profile: AthleteProfile, availability: (Date) -> DayAvailability) -> Date? {
         for offset in 1...6 {

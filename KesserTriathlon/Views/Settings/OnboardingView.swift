@@ -41,7 +41,7 @@ struct OnboardingView: View {
     private var welcome: some View {
         VStack(spacing: 20) {
             Spacer()
-            KonstiView(discipline: .run, level: level, speech: "Servus! Bereit für den Triathlon?", action: true, size: 200)
+            KonstiView(discipline: .run, level: level, speech: "Eeeellooo! Bereit für den Triathlon?", action: true, size: 200)
             Text("Konstis kesser Triathlon").font(.title.weight(.heavy))
             Text("Dein Trainingsplan bis zur Ziellinie: mit Vorschlägen, die sich an deine Form und deinen Kalender anpassen, und einem Pixel-Konsti, der mit jedem Training kesser wird.")
                 .multilineTextAlignment(.center)

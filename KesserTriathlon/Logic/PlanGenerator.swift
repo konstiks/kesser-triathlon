@@ -48,14 +48,19 @@ enum PlanGenerator {
         let taperStep: Int
     }
 
-    /// Standard-Woche (0 = Montag).
-    static let template: [(day: Int, kind: SessionKind)] = [
-        (1, .swimTechnique),
-        (2, .runIntervals),
-        (3, .bikeTempo),
-        (4, .swimEndurance),
-        (5, .bikeLong),
-        (6, .runLong),
+    /// Version der Plan-Logik. Erhöhen, wenn bestehende Pläne beim nächsten Start neu erstellt werden sollen.
+    static let currentVersion = 2
+
+    /// Einheiten nach Wichtigkeit mit bevorzugtem Wochentag (0 = Montag).
+    /// Bei N Trainingstagen pro Woche werden die ersten N genommen, jede an einem eigenen Tag.
+    static let sessionPriority: [(kind: SessionKind, day: Int)] = [
+        (.swimTechnique, 1),   // Di
+        (.bikeLong, 5),        // Sa
+        (.runLong, 6),         // So
+        (.runIntervals, 3),    // Do
+        (.swimEndurance, 4),   // Fr
+        (.bikeTempo, 2),       // Mi
+        (.runEasy, 0),         // Mo
     ]
 
     // MARK: - Phasen
@@ -128,11 +133,13 @@ enum PlanGenerator {
                 result += raceWeek(week: week, profile: profile, from: today)
                 continue
             }
-            // Einheiten auf Tage verteilen, Ruhetage berücksichtigen
+            // N Einheiten auf N verschiedene Tage verteilen (Ruhetage und Arbeitszeit berücksichtigt)
+            let capacity = (0..<7).map { AvailabilityCalculator.planningCapacity(day: week.start.adding(days: $0), profile: profile) }
+            let count = min(7, max(3, profile.trainingDaysPerWeek))
             var assigned: [Int: [SessionKind]] = [:]
-            for (day, kind) in template {
-                guard let target = dayFor(preferred: day, profile: profile, assigned: assigned, isKey: kind.isKey) else { continue }
-                assigned[target, default: []].append(kind)
+            for (kind, preferred) in sessionPriority.prefix(count) {
+                guard let target = dayFor(kind: kind, preferred: preferred, capacity: capacity, used: Set(assigned.keys)) else { continue }
+                assigned[target] = [kind]
                 // Koppeltraining nach der langen Radeinheit in Aufbau- und Spitzenphase
                 if kind == .bikeLong && (week.phase == .build || week.phase == .peak) && !week.isRecovery {
                     assigned[target, default: []].append(.brickRun)
@@ -141,7 +148,7 @@ enum PlanGenerator {
             for (dayIndex, kinds) in assigned {
                 let date = week.start.adding(days: dayIndex)
                 guard date >= today, date < raceDay else { continue }
-                let maxMinutes = Double(max(profile.maxMinutes(on: date), dayMinimum(profile)))
+                let maxMinutes = Double(max(capacity[dayIndex], 20))
                 // gesamte Tagesdauer auf das Tagesbudget begrenzen
                 let raw = kinds.map { minutes(for: $0, week: week, profile: profile) }
                 let total = raw.reduce(0, +)
@@ -183,20 +190,24 @@ enum PlanGenerator {
             context.insert(w)
         }
         profile.planGeneratedAt = .now
+        profile.planVersion = currentVersion
         try? context.save()
     }
 
     // MARK: - Hilfen
 
-    private static func dayMinimum(_ profile: AthleteProfile) -> Int { 20 }
-
-    private static func dayFor(preferred: Int, profile: AthleteProfile, assigned: [Int: [SessionKind]], isKey: Bool) -> Int? {
-        if !profile.restDays.contains(preferred) { return preferred }
-        // nächstgelegenen freien Trainingstag suchen, bevorzugt ohne andere Einheit
-        let candidates = (0..<7).filter { !profile.restDays.contains($0) }
-            .sorted { abs($0 - preferred) < abs($1 - preferred) }
-        if let free = candidates.first(where: { (assigned[$0] ?? []).isEmpty }) { return free }
-        return isKey ? candidates.first : nil
+    /// Wählt den Trainingstag: bevorzugter Tag, sonst der nächstgelegene freie Tag mit genug Zeit.
+    /// Lange Einheiten gehen bevorzugt an den Tag mit der meisten freien Zeit.
+    private static func dayFor(kind: SessionKind, preferred: Int, capacity: [Int], used: Set<Int>) -> Int? {
+        let needed = kind == .bikeLong || kind == .runLong ? 60 : 30
+        let free = (0..<7).filter { !used.contains($0) && capacity[$0] >= 30 }
+        if free.contains(preferred) && capacity[preferred] >= needed { return preferred }
+        let good = free.filter { capacity[$0] >= needed }
+        let pool = good.isEmpty ? free : good
+        if kind == .bikeLong || kind == .runLong {
+            return pool.max { (capacity[$0], -abs($0 - preferred)) < (capacity[$1], -abs($1 - preferred)) }
+        }
+        return pool.min { (abs($0 - preferred), $0) < (abs($1 - preferred), $1) }
     }
 
     private static func minutes(for kind: SessionKind, week: WeekInfo, profile: AthleteProfile) -> Double {
@@ -283,10 +294,10 @@ enum PlanGenerator {
             return ("Ausdauer-Schwimmen", "\(minutes) Min gleichmäßig: z. B. 3×500 m locker mit 30 s Pause. Atmung auf 3er-Zug.")
         case .runIntervals:
             switch phase {
-            case .base: return ("Fahrtspiel", "15 Min einlaufen · 6×2 Min zügig mit 2 Min Trab · 10 Min auslaufen")
+            case .base: return ("Tempowechsel-Lauf", "Lockerer Lauf mit schnelleren Abschnitten: 15 Min einlaufen · 6× 2 Min zügig, dazwischen je 2 Min locker traben · 10 Min auslaufen. Macht schneller, ohne zu überfordern.")
             case .build: return ("Lauf-Intervalle", "15 Min einlaufen · 5×1000 m im 10-km-Tempo, 2 Min Trabpause · 10 Min auslaufen")
             case .peak: return ("Tempolauf", "15 Min einlaufen · 2×12 Min im Wettkampftempo, 3 Min Trab · auslaufen")
-            default: return ("Lockerer Lauf mit Steigerungen", "Locker laufen, am Ende 4 Steigerungen à 100 m")
+            default: return ("Lockerer Lauf mit Steigerungen", "Locker laufen, am Ende 4 Steigerungen à 100 m (langsam schneller werden bis fast Sprint).")
             }
         case .runLong:
             return ("Langer Lauf", "\(minutes) Min ruhig im Grundlagentempo (du kannst noch reden). Verpflegung testen.")

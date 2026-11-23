@@ -38,7 +38,12 @@ struct EditPlannedSheet: View {
                         ForEach(Intensity.allCases) { Text($0.name).tag($0) }
                     }
                     Stepper("Dauer: \(formatMinutes(minutes))", value: $minutes, in: 10...480, step: 5)
-                    Toggle("Schlüsseleinheit", isOn: $isKey)
+                    Toggle(isOn: $isKey) {
+                        VStack(alignment: .leading) {
+                            Text("Wichtige Einheit")
+                            Text("Möglichst nicht ausfallen lassen, lieber verschieben").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 Section("Beschreibung") {
                     TextField("Titel", text: $title)

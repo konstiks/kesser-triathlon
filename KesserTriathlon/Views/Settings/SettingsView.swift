@@ -13,6 +13,19 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if planDirty {
+                    Section {
+                        Button {
+                            PlanGenerator.regenerate(context: context, profile: profile)
+                            planDirty = false
+                            message = "Neuer Plan steht. Viel Spaß! 💪"
+                        } label: {
+                            Label("Einstellungen geändert: Plan jetzt neu erstellen", systemImage: "wand.and.stars")
+                                .font(.headline)
+                        }
+                        .listRowBackground(Color.orange.opacity(0.18))
+                    }
+                }
                 RaceSettingsSection(profile: profile, onChange: { planDirty = true })
 
                 AvailabilitySection(profile: profile, onChange: { planDirty = true })
@@ -83,12 +96,10 @@ struct SettingsView: View {
                             Label("Kalender verbinden", systemImage: "calendar.badge.plus")
                         }
                     }
-                    Stepper("Training ab \(profile.dayStartHour):00 Uhr", value: $profile.dayStartHour, in: 4...12)
-                    Stepper("Training bis \(profile.dayEndHour):00 Uhr", value: $profile.dayEndHour, in: 16...23)
                 } header: {
                     Text("Kalender")
                 } footer: {
-                    Text("Aus deinen Terminen (z. B. Arbeitstermine) berechne ich, wie viel Zeit am Stück frei ist, und passe Vorschläge an oder schlage einen besseren Tag vor. Termine verlassen nie dein iPhone.")
+                    Text("Aus deinen Terminen berechne ich, wie viel Zeit am Stück frei ist, und passe Vorschläge an oder schlage einen besseren Tag vor. Ganztägige Einträge wie Geburtstage zählen nicht. Termine verlassen nie dein iPhone.")
                 }
 
                 Section {
@@ -168,23 +179,13 @@ struct AvailabilitySection: View {
 
     var body: some View {
         Section {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Ruhetage")
-                HStack(spacing: 6) {
-                    ForEach(0..<7, id: \.self) { i in
-                        let isRest = profile.restDays.contains(i)
-                        Button {
-                            if isRest { profile.restDays.removeAll { $0 == i } } else { profile.restDays.append(i) }
-                            onChange()
-                        } label: {
-                            Text(Weekdays.short[i])
-                                .font(.caption.weight(.semibold))
-                                .frame(maxWidth: .infinity, minHeight: 34)
-                                .background(isRest ? Color.accentColor : Color.gray.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
-                                .foregroundStyle(isRest ? Color.white : Color.primary)
-                        }
-                        .buttonStyle(.plain)
-                    }
+            Stepper(value: Binding(get: { profile.trainingDaysPerWeek },
+                                   set: { profile.trainingDaysPerWeek = $0; onChange() }),
+                    in: 3...7) {
+                HStack {
+                    Text("Trainingstage pro Woche")
+                    Spacer()
+                    Text("\(profile.trainingDaysPerWeek)").font(.headline.monospacedDigit())
                 }
             }
             Stepper("Werktags max. \(formatMinutes(profile.weekdayMaxMinutes))",
@@ -193,10 +194,66 @@ struct AvailabilitySection: View {
             Stepper("Wochenende max. \(formatMinutes(profile.weekendMaxMinutes))",
                     value: Binding(get: { profile.weekendMaxMinutes }, set: { profile.weekendMaxMinutes = $0; onChange() }),
                     in: 30...480, step: 15)
+            DayToggleRow(title: "Feste Ruhetage (optional)", days: Binding(
+                get: { profile.restDays }, set: { profile.restDays = $0; onChange() }), color: .gray)
         } header: {
-            Text("Verfügbarkeit")
+            Text("Training")
         } footer: {
-            Text("Der Plan hält sich an diese Grenzen. Lange Einheiten landen am Wochenende.")
+            Text("Der Plan verteilt \(profile.trainingDaysPerWeek) Einheiten auf verschiedene Tage, lange Einheiten bevorzugt aufs Wochenende. An festen Ruhetagen wird nie trainiert.")
+        }
+
+        Section {
+            DayToggleRow(title: "Arbeitstage", days: Binding(
+                get: { profile.workDays }, set: { profile.workDays = $0; onChange() }), color: .accentColor)
+            DatePicker("Arbeit von", selection: timeBinding(\.workStartMinutes), displayedComponents: .hourAndMinute)
+            DatePicker("Arbeit bis", selection: timeBinding(\.workEndMinutes), displayedComponents: .hourAndMinute)
+            Stepper("Training frühestens \(profile.dayStartHour):00 Uhr",
+                    value: Binding(get: { profile.dayStartHour }, set: { profile.dayStartHour = $0; onChange() }), in: 4...12)
+            Stepper("Training spätestens bis \(profile.dayEndHour):00 Uhr",
+                    value: Binding(get: { profile.dayEndHour }, set: { profile.dayEndHour = $0; onChange() }), in: 16...23)
+        } header: {
+            Text("Arbeit & Tageszeiten")
+        } footer: {
+            Text("Während der Arbeitszeit plane und schlage ich kein Training vor. An Arbeitstagen bleibt die Zeit davor und danach.")
+        }
+    }
+
+    private func timeBinding(_ keyPath: ReferenceWritableKeyPath<AthleteProfile, Int>) -> Binding<Date> {
+        Binding(
+            get: { Date.now.startOfDay.addingTimeInterval(TimeInterval(profile[keyPath: keyPath] * 60)) },
+            set: { date in
+                let c = Calendar.de.dateComponents([.hour, .minute], from: date)
+                profile[keyPath: keyPath] = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+                onChange()
+            }
+        )
+    }
+}
+
+/// Auswahl von Wochentagen als Pixel-Buttons.
+struct DayToggleRow: View {
+    let title: String
+    @Binding var days: [Int]
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+            HStack(spacing: 6) {
+                ForEach(0..<7, id: \.self) { i in
+                    let on = days.contains(i)
+                    Button {
+                        if on { days.removeAll { $0 == i } } else { days.append(i); days.sort() }
+                    } label: {
+                        Text(Weekdays.short[i])
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 34)
+                            .background(on ? color : Color.gray.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                            .foregroundStyle(on ? Color.white : Color.primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 }

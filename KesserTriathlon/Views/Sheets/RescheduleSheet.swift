@@ -21,7 +21,7 @@ struct RescheduleSheet: View {
         let date: Date
         let free: Int
         let load: Int
-        let fromCalendar: Bool
+        let limit: DayAvailability.Limit
         var id: Date { date }
     }
 
@@ -32,7 +32,7 @@ struct RescheduleSheet: View {
             let a = calendar.availability(on: d, profile: profile)
             let load = planned.filter { $0.date.isSameDay(as: d) && $0.status == .planned && $0.id != workout.id }
                 .reduce(0) { $0 + $1.minutes }
-            return DayOption(date: d, free: a.largestBlockMinutes, load: load, fromCalendar: a.fromCalendar)
+            return DayOption(date: d, free: a.largestBlockMinutes, load: load, limit: a.limit)
         }
     }
 
@@ -91,8 +91,14 @@ struct RescheduleSheet: View {
     }
 
     private func detail(_ o: DayOption) -> String {
-        var text = o.fromCalendar ? "\(formatMinutes(o.free)) am Stück frei" : "Budget \(formatMinutes(o.free))"
-        if o.free == 0 && !o.fromCalendar { text = "Ruhetag" }
+        var text = "\(formatMinutes(o.free)) am Stück frei"
+        switch o.limit {
+        case .restDay: text = "Fester Ruhetag"
+        case .dayOver: text = "Für heute vorbei"
+        case .work where o.free < 30: text = "Arbeitstag, kaum Zeit"
+        case .calendar where o.free < 30: text = "Termine, kaum Zeit"
+        default: break
+        }
         if o.load > 0 { text += " · schon \(formatMinutes(o.load)) geplant" }
         return text
     }

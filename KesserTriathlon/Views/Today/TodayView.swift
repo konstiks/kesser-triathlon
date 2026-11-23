@@ -93,6 +93,11 @@ struct TodayView: View {
                                 Text(w.details).font(.caption).foregroundStyle(.secondary)
                                     .multilineTextAlignment(.leading)
                             }
+                            if w.isKey && w.status == .planned {
+                                Text("★ Wichtige Einheit der Woche: möglichst nicht ausfallen lassen. Wenn's heute nicht passt, lieber verschieben.")
+                                    .font(.caption2).foregroundStyle(.orange)
+                                    .multilineTextAlignment(.leading)
+                            }
                         }
                         .card()
                     }
