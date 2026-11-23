@@ -5,12 +5,12 @@ import SwiftData
 @Model
 final class AthleteProfile {
     var name: String = "Konsti"
-    var raceName: String = "Mein Triathlon"
-    var raceDate: Date = Calendar.de.date(byAdding: .month, value: 6, to: .now) ?? .now
-    var raceTypeRaw: String = RaceType.olympic.rawValue
-    var swimKm: Double = 1.5
-    var bikeKm: Double = 40
-    var runKm: Double = 10
+    var raceName: String = "Köln-Triathlon"
+    var raceDate: Date = Calendar.de.date(from: DateComponents(year: 2027, month: 9, day: 5)) ?? .now
+    var raceTypeRaw: String = RaceType.custom.rawValue
+    var swimKm: Double = 1.4
+    var bikeKm: Double = 20
+    var runKm: Double = 4.8
 
     /// Ruhetage, 0 = Montag … 6 = Sonntag.
     var restDays: [Int] = [0]
