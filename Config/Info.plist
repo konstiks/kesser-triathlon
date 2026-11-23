@@ -2,15 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Kesser Tri liest deine Schwimm-, Rad- und Lauftrainings von der Apple Watch, um sie automatisch in deinen Trainingsplan zu übernehmen.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>Kesser Tri schreibt keine Daten in Apple Health.</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>de</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Kesser Tri schaut in deinen Kalender, um freie Zeit für Trainings zu finden und Einheiten passend zu verschieben.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Kesser Tri schaut in deinen Kalender, um freie Zeit für Trainings zu finden.</string>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>de</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Kesser Tri liest deine Schwimm-, Rad- und Lauftrainings von der Apple Watch, um sie automatisch in deinen Trainingsplan zu übernehmen.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Kesser Tri schreibt keine Daten in Apple Health.</string>
 </dict>
 </plist>
