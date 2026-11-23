@@ -14,7 +14,15 @@ final class AthleteProfile {
 
     /// Feste Ruhetage (an denen nie trainiert wird), 0 = Montag … 6 = Sonntag.
     var restDays: [Int] = []
-    /// Gewünschte Trainingstage pro Woche (3–7).
+    /// Trainingserfahrung und bisheriger Wochenumfang je Disziplin (Minuten).
+    var experienceRaw: String = Experience.beginner.rawValue
+    var currentSwimMinutes: Int = 0
+    var currentBikeMinutes: Int = 0
+    var currentRunMinutes: Int = 0
+    /// Niveau-Abfrage erledigt (für Nutzer älterer Versionen wird sie einmal nachgeholt).
+    var fitnessSetupDone: Bool = false
+
+    /// Maximale Trainingstage pro Woche (1–7). Am Anfang plant die App ggf. weniger.
     var trainingDaysPerWeek: Int = 4
     /// Arbeitstage (0 = Montag …) und Arbeitszeit in Minuten ab Mitternacht.
     var workDays: [Int] = [0, 1, 2, 3, 4]
@@ -55,6 +63,21 @@ final class AthleteProfile {
             }
         }
     }
+
+    var experience: Experience {
+        get { Experience(rawValue: experienceRaw) ?? .beginner }
+        set { experienceRaw = newValue.rawValue }
+    }
+
+    func currentMinutes(for discipline: Discipline) -> Int {
+        switch discipline {
+        case .swim: return currentSwimMinutes
+        case .bike: return currentBikeMinutes
+        case .run: return currentRunMinutes
+        }
+    }
+
+    var currentWeeklyMinutes: Int { currentSwimMinutes + currentBikeMinutes + currentRunMinutes }
 
     func raceDistance(for discipline: Discipline) -> Double {
         switch discipline {

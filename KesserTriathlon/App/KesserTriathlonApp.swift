@@ -63,6 +63,9 @@ struct RootView: View {
                 .fullScreenCover(isPresented: .constant(!profile.onboardingDone && !showIntro)) {
                     OnboardingView(profile: profile)
                 }
+                .sheet(isPresented: .constant(profile.onboardingDone && !profile.fitnessSetupDone && !showIntro)) {
+                    FitnessCheckSheet(profile: profile)
+                }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         Task { await WorkoutSync.importFromHealth(context: context, profile: profile, health: health) }

@@ -8,6 +8,7 @@ Private iOS-Trainings-App (Swift/SwiftUI) zur Vorbereitung auf Konstis Triathlon
 - **Leveling**: Level 1–20 in vier Stufen: *Frischling → Durchhalter → Ausdauer-Ass → Kesser Konsti*. XP = Minuten × Intensität (+ Bonus, wenn's zum Plan passt). Wer den Plan durchzieht, ist am Wettkampftag Level 20.
 - **Pixel-Cheerleaderin** feuert an: bei Trainings-Meilensteinen (1., 5., 10., 25., … Training), neuen Bestmarken (längste Einheit) und Bestzeiten (schnellstes Tempo), Level-Ups, komplett erledigten Wochen und Countdown-Marken (100, 50, 30, 14, 7, 1 Tag).
 - **Trainingsplan** pro Tag und Woche, periodisiert: Grundlage → Aufbau → Spitze → Tapering → Wettkampfwoche, jede 4. Woche Entlastung. Richtet sich nach Distanz, **Trainingstagen pro Woche**, **Arbeitstagen/-zeiten**, festen Ruhetagen und Zeitbudget.
+- **Niveau & Einstieg**: Einsteiger / Fortgeschritten / Profi plus bisheriger Wochenumfang je Disziplin. Der Plan startet sanft (z. B. 2× 30 Min pro Woche), steigert höchstens ~10 % pro Woche, hat jede 4. Woche Entlastung und gibt der schwächsten Disziplin mehr Einheiten. Phasen vom Wettkampf rückwärts: Einstieg → Grundlage (6 Wo.) → Aufbau (6 Wo.) → Spitze (2 Wo.) → Tapering → Wettkampfwoche.
 - **Start-Animation** mit Pixel-Konsti beim Schwimmen, Radfahren und Laufen.
 - **Fortschrittsbalken** pro Disziplin (Wettkampf-Form aus längster Einheit vs. Wettkampfdistanz und Plantreue der letzten 4 Wochen), Wochen-Chart, Verlauf.
 - **Trainings eintragen, verschieben, auslassen**, mit Zeit, Distanz und **Ampel** für Stimmung und gefühlte Schwere.

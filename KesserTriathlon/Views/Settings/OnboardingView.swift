@@ -16,23 +16,24 @@ struct OnboardingView: View {
                 TabView(selection: $step) {
                     welcome.tag(0)
                     Form { RaceSettingsSection(profile: profile, onChange: {}) }.tag(1)
-                    Form { AvailabilitySection(profile: profile, onChange: {}) }.tag(2)
-                    connect.tag(3)
+                    Form { FitnessSection(profile: profile, onChange: {}) }.tag(2)
+                    Form { AvailabilitySection(profile: profile, onChange: {}) }.tag(3)
+                    connect.tag(4)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .always))
                 .indexViewStyle(.page(backgroundDisplayMode: .always))
 
                 Button {
-                    if step < 3 { withAnimation { step += 1 } } else { finish() }
+                    if step < 4 { withAnimation { step += 1 } } else { finish() }
                 } label: {
-                    Text(step < 3 ? "Weiter" : "Plan erstellen & loslegen")
+                    Text(step < 4 ? "Weiter" : "Plan erstellen & loslegen")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .padding()
             }
-            .navigationTitle(["Willkommen", "Dein Wettkampf", "Deine Zeit", "Verbindungen"][step])
+            .navigationTitle(["Willkommen", "Dein Wettkampf", "Deine Fitness", "Deine Zeit", "Verbindungen"][step])
             .navigationBarTitleDisplayMode(.inline)
             .background(Color(.systemGroupedBackground))
         }
@@ -88,6 +89,7 @@ struct OnboardingView: View {
     }
 
     private func finish() {
+        profile.fitnessSetupDone = true
         PlanGenerator.regenerate(context: context, profile: profile)
         profile.onboardingDone = true
         try? context.save()

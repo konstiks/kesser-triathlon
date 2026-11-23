@@ -3,8 +3,14 @@ import SwiftData
 
 /// Erzeugt einen periodisierten Trainingsplan von heute bis zum Wettkampf.
 ///
-/// Aufbau: Grundlage → Aufbau → Spitze → Tapering → Wettkampfwoche.
-/// In Grundlagen- und Aufbauphase ist jede 4. Woche eine Entlastungswoche.
+/// Angelehnt an etablierte Ansätze (klassische Periodisierung, 80/20-Prinzip, ~10-%-Regel):
+/// - Phasen werden vom Wettkampf aus rückwärts gerechnet: Wettkampfwoche, Tapering,
+///   2 Wochen Spitze, 6 Wochen Aufbau, 6 Wochen Grundlage. Alles davor ist eine sanfte Einstiegsphase.
+/// - Der Wochenumfang startet beim bisherigen Umfang (bzw. einem Minimum je Niveau) und steigt
+///   langsam bis zum Zielumfang des Niveaus, höchstens ~10 % pro Woche. Jede 4. Woche ist Entlastung.
+/// - Die Zahl der Einheiten ergibt sich aus dem Umfang (anfangs wenige), höchstens die eingestellten Trainingstage.
+/// - Disziplinen, in denen bisher wenig trainiert wurde, bekommen mehr Einheiten.
+/// - Überwiegend locker; harte Einheiten erst ab der Aufbauphase (Einsteiger: moderat).
 enum PlanGenerator {
 
     enum SessionKind {
@@ -18,19 +24,30 @@ enum PlanGenerator {
             }
         }
 
-        /// Basisdauer in Minuten für die olympische Distanz in der Aufbauphase.
-        var baseMinutes: Double {
+        /// Gewicht beim Verteilen des Wochenumfangs.
+        var weight: Double {
             switch self {
-            case .swimTechnique: return 45
-            case .swimEndurance: return 50
-            case .runIntervals: return 50
-            case .runLong: return 75
-            case .runEasy: return 40
-            case .bikeTempo: return 70
-            case .bikeLong: return 120
-            case .brickRun: return 20
+            case .bikeLong: return 1.6
+            case .runLong: return 1.3
+            case .brickRun: return 0.35
+            default: return 1.0
             }
         }
+
+        /// Bevorzugter Wochentag (0 = Montag).
+        var preferredDay: Int {
+            switch self {
+            case .swimTechnique: return 1   // Di
+            case .runIntervals: return 3    // Do
+            case .swimEndurance: return 4   // Fr
+            case .bikeLong, .brickRun: return 5   // Sa
+            case .runLong: return 6         // So
+            case .bikeTempo: return 2       // Mi
+            case .runEasy: return 0         // Mo
+            }
+        }
+
+        var isLong: Bool { self == .bikeLong || self == .runLong }
 
         var isKey: Bool {
             switch self {
@@ -40,135 +57,215 @@ enum PlanGenerator {
         }
     }
 
+    /// Reihenfolge der Einheiten je Disziplin (1. Einheit der Woche, 2., 3. …).
+    static func kinds(for d: Discipline) -> [SessionKind] {
+        switch d {
+        case .swim: return [.swimTechnique, .swimEndurance, .swimTechnique]
+        case .bike: return [.bikeLong, .bikeTempo, .bikeTempo]
+        case .run: return [.runLong, .runIntervals, .runEasy]
+        }
+    }
+
     struct WeekInfo {
         let start: Date
         let phase: TrainingPhase
         let isRecovery: Bool
-        let factor: Double
+        /// Wochen bis zur Wettkampfwoche (0 = Wettkampfwoche).
+        let weeksToRace: Int
         let taperStep: Int
     }
 
     /// Version der Plan-Logik. Erhöhen, wenn bestehende Pläne beim nächsten Start neu erstellt werden sollen.
-    static let currentVersion = 2
+    static let currentVersion = 3
 
-    /// Einheiten nach Wichtigkeit mit bevorzugtem Wochentag (0 = Montag).
-    /// Bei N Trainingstagen pro Woche werden die ersten N genommen, jede an einem eigenen Tag.
-    static let sessionPriority: [(kind: SessionKind, day: Int)] = [
-        (.swimTechnique, 1),   // Di
-        (.bikeLong, 5),        // Sa
-        (.runLong, 6),         // So
-        (.runIntervals, 3),    // Do
-        (.swimEndurance, 4),   // Fr
-        (.bikeTempo, 2),       // Mi
-        (.runEasy, 0),         // Mo
-    ]
+    /// Training nach Ziel-Anteil: Schwimmen ~25 %, Rad ~40 %, Laufen ~35 %.
+    static let idealShare: [Discipline: Double] = [.swim: 0.25, .bike: 0.40, .run: 0.35]
 
-    // MARK: - Phasen
+    // MARK: - Phasen (vom Wettkampf aus rückwärts)
+
+    static func phase(weeksToRace w: Int, taperWeeks: Int) -> TrainingPhase {
+        if w <= 0 { return .race }
+        if w <= taperWeeks { return .taper }
+        if w <= taperWeeks + 2 { return .peak }
+        if w <= taperWeeks + 8 { return .build }
+        if w <= taperWeeks + 14 { return .base }
+        return .prep
+    }
 
     static func weeks(from start: Date, profile: AthleteProfile) -> [WeekInfo] {
         let firstWeek = start.startOfWeek
         let raceWeek = profile.raceDay.startOfWeek
         let count = max(1, firstWeek.days(until: raceWeek) / 7 + 1)
-        let taper = min(profile.taperWeeks, max(0, count - 1))
-        let remaining = max(0, count - 1 - taper)
-        var peak = remaining >= 4 ? max(1, Int((Double(remaining) * 0.2).rounded())) : 0
-        var build = remaining >= 3 ? Int((Double(remaining) * 0.4).rounded()) : remaining
-        if remaining < 3 { peak = 0 }
-        build = min(build, remaining - peak)
-        let base = max(0, remaining - peak - build)
+        let taper = profile.taperWeeks
+        return (0..<count).map { i -> WeekInfo in
+            let w = count - 1 - i
+            let ph = PlanGenerator.phase(weeksToRace: w, taperWeeks: taper)
+            // Entlastung alle 4 Wochen (festes Raster vom Wettkampf aus, damit es beim Neu-Erstellen stabil bleibt)
+            let loadPhases: [TrainingPhase] = [.prep, .base, .build]
+            let isRecovery = loadPhases.contains(ph) && (w - taper - 2) % 4 == 0 && i > 0
+            return WeekInfo(start: firstWeek.adding(days: i * 7), phase: ph, isRecovery: isRecovery,
+                            weeksToRace: w, taperStep: ph == .taper ? taper - w : 0)
+        }
+    }
 
-        var result: [WeekInfo] = []
-        for i in 0..<count {
-            let weekStart = firstWeek.adding(days: i * 7)
-            let phase: TrainingPhase
-            var indexInPhase = 0
-            var phaseLength = 1
-            var taperStep = 0
-            if i == count - 1 {
-                phase = .race
-            } else if i >= count - 1 - taper {
-                phase = .taper
-                taperStep = i - (count - 1 - taper)
-            } else if i < base {
-                phase = .base; indexInPhase = i; phaseLength = base
-            } else if i < base + build {
-                phase = .build; indexInPhase = i - base; phaseLength = build
-            } else {
-                phase = .peak; indexInPhase = i - base - build; phaseLength = peak
-            }
+    static func phase(on date: Date, profile: AthleteProfile) -> TrainingPhase {
+        let w = max(0, date.startOfWeek.days(until: profile.raceDay.startOfWeek) / 7)
+        return phase(weeksToRace: w, taperWeeks: profile.taperWeeks)
+    }
 
-            let isRecovery = (phase == .base || phase == .build) && indexInPhase % 4 == 3
-            let ramp = phaseLength > 1 ? Double(indexInPhase) / Double(phaseLength - 1) : 0.5
-            var factor: Double
-            switch phase {
-            case .base: factor = 0.75 + 0.15 * ramp
-            case .build: factor = 0.92 + 0.15 * ramp
-            case .peak: factor = 1.08
-            case .taper: factor = taperStep == 0 ? (taper > 1 ? 0.7 : 0.6) : 0.5
-            case .race: factor = 0.35
+    // MARK: - Umfang & Gewichtung
+
+    /// Zielumfang pro Woche in der Spitzenphase (Minuten).
+    static func peakMinutes(profile: AthleteProfile) -> Double {
+        profile.experience.peakWeeklyMinutes * profile.volumeFactor
+    }
+
+    /// Startumfang: bisheriger Umfang (Angabe oder tatsächlich trainiert), mindestens das Minimum des Niveaus.
+    static func startMinutes(profile: AthleteProfile, recentWeeklyMinutes: Double) -> Double {
+        let current = max(Double(profile.currentWeeklyMinutes), recentWeeklyMinutes)
+        let peak = peakMinutes(profile: profile)
+        return min(max(current, profile.experience.minimumStartMinutes), peak * 0.8)
+    }
+
+    /// Gewicht je Disziplin: Ziel-Anteil, verstärkt für Disziplinen, in denen bisher wenig trainiert wird.
+    static func disciplineWeights(profile: AthleteProfile) -> [Discipline: Double] {
+        let total = Double(profile.currentWeeklyMinutes)
+        var result: [Discipline: Double] = [:]
+        for d in Discipline.allCases {
+            let ideal = idealShare[d] ?? 0.33
+            var deficit = 0.0
+            if total > 0 {
+                let actualShare = Double(profile.currentMinutes(for: d)) / total
+                deficit = max(0, min(1, 1 - actualShare / ideal))
             }
-            if isRecovery { factor *= 0.7 }
-            result.append(WeekInfo(start: weekStart, phase: phase, isRecovery: isRecovery, factor: factor, taperStep: taperStep))
+            result[d] = ideal * (1 + 0.6 * deficit)
         }
         return result
     }
 
-    static func phase(on date: Date, profile: AthleteProfile) -> TrainingPhase {
-        if date >= profile.raceDay.startOfWeek { return .race }
-        let start = (profile.planGeneratedAt ?? date).startOfWeek
-        let all = weeks(from: min(start, date), profile: profile)
-        return all.first(where: { $0.start.isSameDay(as: date.startOfWeek) })?.phase ?? .base
+    /// Disziplin mit dem größten Nachholbedarf (nil, wenn ausgeglichen oder keine Angaben).
+    static func focusDiscipline(profile: AthleteProfile) -> Discipline? {
+        guard profile.currentWeeklyMinutes > 0 else { return nil }
+        let weights = disciplineWeights(profile: profile)
+        let boosted = Discipline.allCases.max { (weights[$0]! / idealShare[$0]!) < (weights[$1]! / idealShare[$1]!) }
+        guard let d = boosted, weights[d]! / idealShare[d]! > 1.15 else { return nil }
+        return d
+    }
+
+    /// Wochenumfang für jede Woche.
+    static func weeklyMinutes(weeks: [WeekInfo], start: Double, peak: Double) -> [Double] {
+        // Index der ersten Spitzenwoche (oder letzte Woche vor dem Tapering)
+        let rampEnd = weeks.firstIndex { $0.phase == .peak || $0.phase == .taper || $0.phase == .race } ?? max(0, weeks.count - 1)
+        var result: [Double] = []
+        var lastLoad = start
+        for (i, week) in weeks.enumerated() {
+            var target: Double
+            switch week.phase {
+            case .taper: target = peak * (week.taperStep == 0 ? 0.6 : 0.45)
+            case .race: target = peak * 0.3
+            case .peak: target = peak
+            default:
+                // sanfte Kurve: am Anfang flach, später steiler
+                let t = rampEnd > 0 ? Double(i) / Double(rampEnd) : 1
+                target = start + (peak - start) * pow(min(1, t), 1.4)
+                if week.phase == .prep { target = min(target, peak * 0.6) }
+            }
+            if week.phase != .taper && week.phase != .race {
+                // höchstens ~10 % Steigerung gegenüber der letzten normalen Woche
+                target = min(target, lastLoad * 1.10)
+                target = max(target, min(start, lastLoad))
+                lastLoad = target
+            }
+            if week.isRecovery { target *= 0.7 }
+            result.append(target)
+        }
+        return result
     }
 
     // MARK: - Plan erzeugen
 
-    static func generate(from startDate: Date, profile: AthleteProfile) -> [PlannedWorkout] {
+    static func generate(from startDate: Date, profile: AthleteProfile, recentWeeklyMinutes: Double = 0) -> [PlannedWorkout] {
         let today = startDate.startOfDay
         let raceDay = profile.raceDay
         guard raceDay > today else { return [] }
 
+        let allWeeks = weeks(from: today, profile: profile)
+        let peak = peakMinutes(profile: profile)
+        let start = startMinutes(profile: profile, recentWeeklyMinutes: recentWeeklyMinutes)
+        let volumes = weeklyMinutes(weeks: allWeeks, start: start, peak: peak)
+        let weights = disciplineWeights(profile: profile)
+        let experience = profile.experience
+        let maxDays = min(7, max(1, profile.trainingDaysPerWeek))
+        // Über die Wochen mitgezählt, damit bei wenigen Einheiten pro Woche alle Disziplinen drankommen
+        var cumulative: [Discipline: Double] = [.swim: 0, .bike: 0, .run: 0]
+
         var result: [PlannedWorkout] = []
-        for week in weeks(from: today, profile: profile) {
+        for (week, volume) in zip(allWeeks, volumes) {
             if week.phase == .race {
                 result += raceWeek(week: week, profile: profile, from: today)
                 continue
             }
-            // N Einheiten auf N verschiedene Tage verteilen (Ruhetage und Arbeitszeit berücksichtigt)
             let capacity = (0..<7).map { AvailabilityCalculator.planningCapacity(day: week.start.adding(days: $0), profile: profile) }
-            let count = min(7, max(3, profile.trainingDaysPerWeek))
+            let usableDays = capacity.filter { $0 >= 30 }.count
+            guard usableDays > 0 else { continue }
+
+            // Anzahl Einheiten aus dem Umfang ableiten
+            var sessions = Int((volume / experience.typicalSessionMinutes).rounded())
+            sessions = min(max(1, sessions), maxDays, usableDays)
+
+            // Disziplinen verteilen (gewichtet, Sainte-Laguë-artig über alle Wochen)
+            var perWeek: [Discipline: Int] = [.swim: 0, .bike: 0, .run: 0]
+            var chosen: [SessionKind] = []
+            for _ in 0..<sessions {
+                let candidates = Discipline.allCases.filter { sessions > 3 || perWeek[$0]! == 0 }
+                let pool = candidates.isEmpty ? Discipline.allCases : candidates
+                let d = pool.max { a, b in
+                    weights[a]! / (cumulative[a]! + Double(perWeek[a]!) * 2 + 1) <
+                    weights[b]! / (cumulative[b]! + Double(perWeek[b]!) * 2 + 1)
+                }!
+                let list = kinds(for: d)
+                chosen.append(list[min(perWeek[d]!, list.count - 1)])
+                perWeek[d]! += 1
+            }
+            for d in Discipline.allCases { cumulative[d]! += Double(perWeek[d]!) }
+
+            // Tage zuweisen: lange Einheiten zuerst
             var assigned: [Int: [SessionKind]] = [:]
-            for (kind, preferred) in sessionPriority.prefix(count) {
-                guard let target = dayFor(kind: kind, preferred: preferred, capacity: capacity, used: Set(assigned.keys)) else { continue }
+            for kind in chosen.sorted(by: { ($0.isLong ? 0 : 1) < ($1.isLong ? 0 : 1) }) {
+                guard let target = dayFor(kind: kind, capacity: capacity, used: Set(assigned.keys)) else { continue }
                 assigned[target] = [kind]
-                // Koppeltraining nach der langen Radeinheit in Aufbau- und Spitzenphase
-                if kind == .bikeLong && (week.phase == .build || week.phase == .peak) && !week.isRecovery {
-                    assigned[target, default: []].append(.brickRun)
+                // Koppellauf nach der langen Radeinheit in Aufbau- und Spitzenphase
+                if kind == .bikeLong && (week.phase == .build || week.phase == .peak) && !week.isRecovery && sessions >= 3 {
+                    assigned[target]!.append(.brickRun)
                 }
             }
+
+            // Umfang auf die Einheiten verteilen
+            let totalWeight = assigned.values.flatMap { $0 }.reduce(0) { $0 + $1.weight }
+            guard totalWeight > 0 else { continue }
             for (dayIndex, kinds) in assigned {
                 let date = week.start.adding(days: dayIndex)
                 guard date >= today, date < raceDay else { continue }
+                let raw = kinds.map { volume * $0.weight / totalWeight }
+                let dayTotal = raw.reduce(0, +)
                 let maxMinutes = Double(max(capacity[dayIndex], 20))
-                // gesamte Tagesdauer auf das Tagesbudget begrenzen
-                let raw = kinds.map { minutes(for: $0, week: week, profile: profile) }
-                let total = raw.reduce(0, +)
-                let scale = total > maxMinutes ? maxMinutes / total : 1
+                let scale = dayTotal > maxMinutes ? maxMinutes / dayTotal : 1
                 for (kind, m) in zip(kinds, raw) {
-                    let mins = roundTo5(max(15, m * scale))
-                    let intensity = intensity(for: kind, week: week)
-                    let text = describe(kind: kind, phase: week.phase, recovery: week.isRecovery, minutes: mins)
-                    let w = PlannedWorkout(
+                    let mins = roundTo5(max(kind == .brickRun ? 10 : 20, m * scale))
+                    let level = intensity(for: kind, week: week, experience: experience)
+                    let text = describe(kind: kind, phase: week.phase, recovery: week.isRecovery,
+                                        minutes: mins, experience: experience)
+                    result.append(PlannedWorkout(
                         date: date,
                         discipline: kind.discipline,
-                        intensity: intensity,
+                        intensity: level,
                         minutes: mins,
-                        distanceKm: estimatedDistance(kind.discipline, minutes: mins, intensity: intensity),
+                        distanceKm: estimatedDistance(kind.discipline, minutes: mins, intensity: level, experience: experience),
                         title: text.title,
                         details: text.details,
                         phase: week.phase,
-                        isKey: kind.isKey && !week.isRecovery
-                    )
-                    result.append(w)
+                        isKey: kind.isKey && !week.isRecovery && week.phase != .prep
+                    ))
                 }
             }
         }
@@ -183,10 +280,12 @@ enum PlanGenerator {
         for w in all where w.isGenerated && w.status == .planned && w.date >= today {
             context.delete(w)
         }
-        // Wenn heute schon trainiert wurde, ab morgen planen.
         let completed = (try? context.fetch(FetchDescriptor<CompletedWorkout>())) ?? []
+        // Tatsächlicher Umfang der letzten 3 Wochen fließt in den Startumfang ein
+        let recent = completed.filter { $0.date >= today.adding(days: -21) }.reduce(0) { $0 + $1.durationMinutes } / 3
+        // Wenn heute schon trainiert wurde, ab morgen planen.
         let start = completed.contains(where: { $0.date.isToday }) ? today.adding(days: 1) : today
-        for w in generate(from: start, profile: profile) {
+        for w in generate(from: start, profile: profile, recentWeeklyMinutes: recent) {
             context.insert(w)
         }
         profile.planGeneratedAt = .now
@@ -196,50 +295,47 @@ enum PlanGenerator {
 
     // MARK: - Hilfen
 
-    /// Wählt den Trainingstag: bevorzugter Tag, sonst der nächstgelegene freie Tag mit genug Zeit.
-    /// Lange Einheiten gehen bevorzugt an den Tag mit der meisten freien Zeit.
-    private static func dayFor(kind: SessionKind, preferred: Int, capacity: [Int], used: Set<Int>) -> Int? {
-        let needed = kind == .bikeLong || kind == .runLong ? 60 : 30
+    /// Wählt den Trainingstag: bevorzugter Tag, sonst ein freier Tag mit genug Zeit,
+    /// möglichst nicht direkt neben einem anderen Trainingstag.
+    private static func dayFor(kind: SessionKind, capacity: [Int], used: Set<Int>) -> Int? {
+        let preferred = kind.preferredDay
+        let needed = kind.isLong ? 60 : 30
         let free = (0..<7).filter { !used.contains($0) && capacity[$0] >= 30 }
         if free.contains(preferred) && capacity[preferred] >= needed { return preferred }
         let good = free.filter { capacity[$0] >= needed }
         let pool = good.isEmpty ? free : good
-        if kind == .bikeLong || kind == .runLong {
-            return pool.max { (capacity[$0], -abs($0 - preferred)) < (capacity[$1], -abs($1 - preferred)) }
+        func neighbours(_ d: Int) -> Int { (used.contains(d - 1) ? 1 : 0) + (used.contains(d + 1) ? 1 : 0) }
+        if kind.isLong {
+            return pool.max { (capacity[$0], -neighbours($0), -abs($0 - preferred)) < (capacity[$1], -neighbours($1), -abs($1 - preferred)) }
         }
-        return pool.min { (abs($0 - preferred), $0) < (abs($1 - preferred), $1) }
+        return pool.min { (neighbours($0), abs($0 - preferred), $0) < (neighbours($1), abs($1 - preferred), $1) }
     }
 
-    private static func minutes(for kind: SessionKind, week: WeekInfo, profile: AthleteProfile) -> Double {
-        var factor = week.factor
-        // Lange Einheiten skalieren stärker mit der Wettkampfdistanz
-        switch kind {
-        case .bikeLong, .runLong: factor *= profile.volumeFactor
-        case .brickRun: factor *= max(1, profile.volumeFactor * 0.9)
-        default: factor *= 1 + (profile.volumeFactor - 1) * 0.5
-        }
-        return kind.baseMinutes * factor
-    }
-
-    private static func intensity(for kind: SessionKind, week: WeekInfo) -> Intensity {
-        if week.isRecovery { return kind == .swimTechnique ? .easy : (kind.isKey ? .easy : .recovery) }
+    private static func intensity(for kind: SessionKind, week: WeekInfo, experience: Experience) -> Intensity {
+        if week.isRecovery { return kind.isKey || kind == .swimTechnique ? .easy : .recovery }
+        let base: Intensity
         switch (week.phase, kind) {
-        case (_, .runLong), (_, .swimEndurance), (_, .runEasy): return .easy
-        case (.base, .bikeLong): return .easy
-        case (_, .bikeLong): return .moderate
-        case (.base, .runIntervals): return .moderate
-        case (_, .runIntervals): return .hard
-        case (.base, .swimTechnique): return .easy
-        case (_, .swimTechnique): return .hard
-        case (.base, .bikeTempo): return .moderate
-        case (.taper, .bikeTempo): return .moderate
-        case (_, .bikeTempo): return .hard
-        case (_, .brickRun): return .moderate
+        case (.prep, _): base = .easy
+        case (_, .runLong), (_, .swimEndurance), (_, .runEasy): base = .easy
+        case (.base, .bikeLong): base = .easy
+        case (_, .bikeLong): base = .moderate
+        case (.base, .runIntervals): base = .moderate
+        case (_, .runIntervals): base = .hard
+        case (.base, .swimTechnique): base = .easy
+        case (_, .swimTechnique): base = .hard
+        case (.base, .bikeTempo): base = .moderate
+        case (.taper, .bikeTempo): base = .moderate
+        case (_, .bikeTempo): base = .hard
+        case (_, .brickRun): base = .moderate
         }
+        // Einsteiger: harte Intervalle erst in der Spitzenphase
+        if experience == .beginner && base == .hard && week.phase != .peak { return .moderate }
+        return base
     }
 
-    static func estimatedDistance(_ d: Discipline, minutes: Int, intensity: Intensity) -> Double {
-        let speedFactor: Double = intensity >= .moderate ? 1.07 : 1.0
+    static func estimatedDistance(_ d: Discipline, minutes: Int, intensity: Intensity,
+                                  experience: Experience = .intermediate) -> Double {
+        let speedFactor: Double = (intensity >= .moderate ? 1.07 : 1.0) * experience.speedFactor
         let km = Double(minutes) * d.kmPerMinute * speedFactor
         switch d {
         case .swim: return (km * 20).rounded() / 20          // auf 50 m
@@ -273,7 +369,24 @@ enum PlanGenerator {
 
     // MARK: - Beschreibungen
 
-    static func describe(kind: SessionKind, phase: TrainingPhase, recovery: Bool, minutes: Int) -> (title: String, details: String) {
+    static func describe(kind: SessionKind, phase: TrainingPhase, recovery: Bool, minutes: Int,
+                         experience: Experience = .intermediate) -> (title: String, details: String) {
+        if phase == .prep {
+            switch kind.discipline {
+            case .swim:
+                if experience == .beginner {
+                    return ("Schwimm-Einstieg", "\(minutes) Min: abwechselnd 25–50 m kraulen und 20–30 s Pause am Beckenrand. Fokus: unter Wasser ruhig ausatmen, lang machen. Zwischendurch Brust ist völlig okay.")
+                }
+                return ("Technik-Schwimmen", "\(minutes) Min locker: Technikübungen (Abschlag, Faustschwimmen) im Wechsel mit ruhigen 100ern. Züge pro Bahn zählen und senken.")
+            case .bike:
+                return ("Lockere Radrunde", "\(minutes) Min entspannt fahren, Trittfrequenz eher hoch (80–90). Du solltest dich dabei problemlos unterhalten können. Rollentrainer zählt auch.")
+            case .run:
+                if experience == .beginner {
+                    return ("Lauf-Geh-Training", "\(minutes) Min: 5 Min zügig gehen, dann im Wechsel 2 Min locker laufen und 1 Min gehen. Die Laufabschnitte werden mit der Zeit länger. Lieber zu langsam als zu schnell!")
+                }
+                return ("Lockerer Lauf", "\(minutes) Min im Plauder-Tempo. Am Ende 3–4 kurze Steigerungen, wenn's sich gut anfühlt.")
+            }
+        }
         if recovery {
             switch kind.discipline {
             case .swim: return ("Lockeres Techniktraining", "Entlastungswoche: \(minutes) Min ruhig schwimmen, Fokus auf langen Zug und Wasserlage. Mit Pullbuoy abwechseln.")

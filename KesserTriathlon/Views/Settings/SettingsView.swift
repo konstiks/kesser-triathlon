@@ -28,6 +28,8 @@ struct SettingsView: View {
                 }
                 RaceSettingsSection(profile: profile, onChange: { planDirty = true })
 
+                FitnessSection(profile: profile, onChange: { planDirty = true })
+
                 AvailabilitySection(profile: profile, onChange: { planDirty = true })
 
                 Section {
@@ -181,9 +183,9 @@ struct AvailabilitySection: View {
         Section {
             Stepper(value: Binding(get: { profile.trainingDaysPerWeek },
                                    set: { profile.trainingDaysPerWeek = $0; onChange() }),
-                    in: 3...7) {
+                    in: 1...7) {
                 HStack {
-                    Text("Trainingstage pro Woche")
+                    Text("Höchstens Trainingstage pro Woche")
                     Spacer()
                     Text("\(profile.trainingDaysPerWeek)").font(.headline.monospacedDigit())
                 }
@@ -199,7 +201,7 @@ struct AvailabilitySection: View {
         } header: {
             Text("Training")
         } footer: {
-            Text("Der Plan verteilt \(profile.trainingDaysPerWeek) Einheiten auf verschiedene Tage, lange Einheiten bevorzugt aufs Wochenende. An festen Ruhetagen wird nie trainiert.")
+            Text("Höchstens \(profile.trainingDaysPerWeek) Einheiten pro Woche, jede an einem eigenen Tag. Am Anfang plane ich oft weniger; mehr wird es erst, wenn der Umfang steigt. Lange Einheiten bevorzugt am Wochenende, an festen Ruhetagen nie.")
         }
 
         Section {
